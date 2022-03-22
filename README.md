@@ -139,3 +139,12 @@ python3 fuzzer/main.py -s examples/RemiCoin/contracts/RemiCoin.sol -c RemiCoin -
 ``` shell
 python3 fuzzer/main.py -a examples/RemiCoin/abi.json -c 0x7dc4f41294697a7903c4027f6ac528c5d14cd7eb -b 5752250 --evm byzantium -g 20 --rpc-host <RPC-HOST> --rpc-port <RPC-PORT>
 ```
+
+
+## Fetch Etherscan Contracts Dataset 
+
+Example: fetching 10 contracts .sol files of cluster 1.
+
+``` shell
+python3 dataset/etherscan/etherscan_fetch_src.py -c 1 -n 10 -k <ETHERSCAN_API_KEY>
+```
