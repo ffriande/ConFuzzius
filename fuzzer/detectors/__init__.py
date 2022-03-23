@@ -63,7 +63,8 @@ class DetectorExecutor:
             "type": type,
             "individual": individual.solution,
             "time": time.time() - mfe.execution_begin,
-
+            "total_transactions": mfe.nr_of_transactions,
+            "unique_transactions": len(mfe.unique_individuals),
         }
         if source_map and source_map.get_buggy_line(pc):
             error["line"] = source_map.get_location(pc)['begin']['line'] + 1
@@ -87,6 +88,7 @@ class DetectorExecutor:
         return ""
 
     def run_detectors(self, previous_instruction, current_instruction, errors, tainted_record, individual, mfe, previous_branch, transaction_index):
+        error_detected = False
         pc = self.arbitrary_memory_access_detector.detect_arbitrary_memory_access(tainted_record, individual, current_instruction)
         if pc and DetectorExecutor.add_error(errors, pc, "Arbitrary Memory Access", individual, mfe, self.arbitrary_memory_access_detector, self.source_map):
             color = DetectorExecutor.get_color_for_severity(self.arbitrary_memory_access_detector.severity)
@@ -106,6 +108,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.assertion_failure_detector.detect_assertion_failure(current_instruction)
@@ -127,6 +130,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc, type = self.integer_overflow_detector.detect_integer_overflow(previous_instruction, current_instruction, tainted_record)
@@ -153,6 +157,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.reentrancy_detector.detect_reentrancy(tainted_record, current_instruction)
@@ -174,6 +179,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.transaction_order_dependency_detector.detect_transaction_order_dependency(current_instruction, tainted_record, individual, transaction_index)
@@ -195,6 +201,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.block_dependency_detector.detect_block_dependency(tainted_record, current_instruction, previous_branch)
@@ -216,6 +223,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.unhandled_exception_detector.detect_unhandled_exception(previous_instruction, current_instruction, tainted_record)
@@ -237,6 +245,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.unsafe_delegatecall_detector.detect_unsafe_delegatecall(current_instruction, tainted_record, individual, previous_instruction)
@@ -258,6 +267,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.leaking_ether_detector.detect_leaking_ether(current_instruction, tainted_record, individual, transaction_index, previous_branch)
@@ -279,6 +289,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.locking_ether_detector.detect_locking_ether(mfe.cfg, current_instruction, individual, transaction_index)
@@ -300,6 +311,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
 
         pc = self.unprotected_selfdestruct_detector.detect_unprotected_selfdestruct(current_instruction, tainted_record, individual, transaction_index)
@@ -321,4 +333,7 @@ class DetectorExecutor:
                 self.logger.title(color+"-----------------------------------------------------")
             self.logger.title(color+"Transaction sequence:")
             self.logger.title(color+"-----------------------------------------------------")
+            error_detected = True
             print_individual_solution_as_transaction(self.logger, individual.solution, color, self.function_signature_mapping)
+        
+        return error_detected

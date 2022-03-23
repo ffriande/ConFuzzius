@@ -20,6 +20,10 @@ from z3.z3util import get_vars
 
 from utils import settings
 
+import numpy as np
+
+from .spectrum import Transaction
+
 class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
     def __init__(self, fuzzing_environment: FuzzingEnvironment) -> None:
         self.logger = initialize_logger("Analysis")
@@ -49,7 +53,6 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
                     b.append(arg)
             print(b)"""
 
-
         executed_individuals = dict()
         for i, individual in enumerate(population.individuals):
             if individual.hash in executed_individuals:
@@ -63,6 +66,10 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
         engine._update_statvars()
 
     def register_step(self, g, population, engine):
+        self.env.spectrum.gen_indvs_ddu_scores = {}
+        if self.env.args.ddu_fit_indv:
+            self.env.spectrum.update_next_gen_transactions()
+
         self.execute(population, engine)
 
         code_coverage_percentage = 0
@@ -76,10 +83,19 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
         if len(self.env.overall_jumpis) > 0:
             branch_coverage_percentage = (branch_coverage / (len(self.env.overall_jumpis) * 2)) * 100
 
-        msg = 'Generation number {} \t Code coverage: {:.2f}% ({}/{}) \t Branch coverage: {:.2f}% ({}/{}) \t ' \
-              'Transactions: {} ({} unique)   \t Time: {}'.format(
-            g + 1, code_coverage_percentage, len(self.env.code_coverage), len(self.env.overall_pcs),
-            branch_coverage_percentage, branch_coverage, len(self.env.overall_jumpis) * 2, self.env.nr_of_transactions, len(self.env.unique_individuals),
+        density, diversity, uniqueness = self.env.spectrum.calculate_ddu()
+        ddu = density * diversity * uniqueness
+        
+        msg = 'Generation number {}\
+             \t Code coverage: {:.2f}% ({}/{}) \
+                 \t Branch coverage: {:.2f}% ({}/{}) \t ' \
+              'Transactions: {} ({} unique)\
+                     \t Time: {} '.format(
+        
+            g + 1,
+            code_coverage_percentage, len( self.env.code_coverage), len(self.env.overall_pcs),
+            branch_coverage_percentage, branch_coverage, len(self.env.overall_jumpis) * 2,
+            self.env.nr_of_transactions, len(self.env.unique_individuals),
             time.time() - self.env.execution_begin)
         self.logger.title(msg)
 
@@ -87,14 +103,16 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
         if "generations" not in self.env.results:
             self.env.results["generations"] = []
 
-        self.env.results["generations"].append({
+        coverage_info = {
             "generation": g + 1,
             "time": time.time() - self.env.execution_begin,
             "total_transactions": self.env.nr_of_transactions,
             "unique_transactions": len(self.env.unique_individuals),
             "code_coverage": code_coverage_percentage,
-            "branch_coverage": branch_coverage_percentage
-        })
+            "branch_coverage": branch_coverage_percentage,
+            "ddu": ddu
+        }
+        self.env.results["generations"].append(coverage_info)
 
         if len(self.env.code_coverage) == self.env.previous_code_coverage_length:
             self.symbolic_execution(population.indv_generator)
@@ -117,6 +135,10 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
         branches = {}
         indv.data_dependencies = []
         contract_address = None
+        error_detected = False
+
+        # Initialize transaction activity array
+        activity_array = np.zeros((1, self.env.spectrum.nr_components), dtype=bool)
 
         env.detector_executor.initialize_detectors()
 
@@ -164,7 +186,7 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
 
                 env.symbolic_taint_analyzer.propagate_taint(instruction, contract_address)
 
-                env.detector_executor.run_detectors(previous_instruction, instruction, env.results["errors"],
+                error_detected = env.detector_executor.run_detectors(previous_instruction, instruction, env.results["errors"],
                                                 env.symbolic_taint_analyzer.get_tainted_record(index=-2), indv, env, previous_branch,
                                                 transaction_index)
 
@@ -176,6 +198,10 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
 
                 # Code coverage
                 env.code_coverage.add(hex(instruction["pc"]))
+
+                if self.env.spectrum.granularity == "pcs":
+                    pc_index = self.env.overall_pcs.index(instruction["pc"])
+                    activity_array[0][pc_index] = True
 
                 # Dynamically build control flow graph
                 if env.cfg:
@@ -228,6 +254,12 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
                         previous_branch_expression = None
 
                     previous_branch_address = jumpi_pc
+                    
+                    # Update activity array
+                    if self.env.spectrum.granularity == "jumpis":
+                        component_index = self.env.overall_jumpis.index(jumpi_pc)
+                        component_index = component_index * 2 + jumpi_condition
+                        activity_array[0][component_index] = True
 
                 # Extract data dependencies (read-after-write)
                 elif instruction["op"] == "SLOAD":
@@ -457,6 +489,13 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
 
         #print(indv.generator.arguments_pool)
         #print(indv.generator.amounts_pool)
+        
+        system_transaction = Transaction(indv.hash, error_detected, activity_array)
+        self.env.spectrum.update_transactions(system_transaction)
+        self.env.spectrum.update_indv_ddu(indv.hash)
+        if self.env.args.ddu_fit_indv:
+            self.env.spectrum.revoke_transaction(system_transaction)
+        
 
     def get_coverage_with_children(self, children_code_coverage, code_coverage):
         code_coverage = len(code_coverage)
@@ -714,6 +753,8 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
         branch_coverage_percentage = 0
         if len(self.env.overall_jumpis) > 0:
             branch_coverage_percentage = (branch_coverage / (len(self.env.overall_jumpis) * 2)) * 100
+        density, diversity, uniqueness = self.env.spectrum.calculate_ddu()
+        ddu = density * diversity * uniqueness
         msg = 'Total branch coverage: \t {:.2f}% ({}/{})'.format(branch_coverage_percentage,
                                                                  branch_coverage, len(self.env.overall_jumpis) * 2)
         self.logger.info(msg)
@@ -724,6 +765,7 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
 
         # Save to results
         self.env.results["transactions"] = {"total": self.env.nr_of_transactions,
+                                            "unique": len(self.env.unique_individuals),
                                             "per_second": self.env.nr_of_transactions / execution_delta}
         self.env.results["code_coverage"] = {"percentage": code_coverage_percentage,
                                              "covered": len(self.env.code_coverage),
@@ -736,6 +778,10 @@ class ExecutionTraceAnalyzer(OnTheFlyAnalysis):
         self.env.results["branch_coverage"] = {"percentage": branch_coverage_percentage,
                                                "covered": branch_coverage,
                                                "total": len(self.env.overall_jumpis) * 2}
+        self.env.results["ddu"] = {"ddu": ddu,
+                                               "density": density,
+                                               "diversity": diversity,
+                                               "uniqueness": uniqueness}
         self.env.results["execution_time"] = execution_delta
         self.env.results["memory_consumption"] = psutil.Process(os.getpid()).memory_info().rss/1024/1024
         self.env.results["address_under_test"] = self.env.population.indv_generator.contract

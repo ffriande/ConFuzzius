@@ -33,3 +33,22 @@ def compute_data_dependency_fitness(indv, data_dependencies):
                     data_dependency_fitness += 1
 
     return data_dependency_fitness
+
+def fitness_function_ddu(indv, env):
+    if indv.hash in env.spectrum.gen_indvs_ddu_scores:
+        ddu_fit = env.spectrum.gen_indvs_ddu_scores[indv.hash]
+    else:
+        print("FAIL DDU FETCH = ", ddu_fit)
+        ddu_fit = 0.0
+
+    if env.args.data_dependency:
+        data_dependency_fit = compute_data_dependency_fitness(indv, env.data_dependencies)
+        
+        if len(env.data_dependencies) == 0:
+            data_dependency_fit_normalized = 0
+        else:
+            data_dependency_fit_normalized = data_dependency_fit / (len(env.data_dependencies))
+
+        return ddu_fit + data_dependency_fit_normalized
+
+    return ddu_fit

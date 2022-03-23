@@ -19,6 +19,7 @@ from engine import EvolutionaryFuzzingEngine
 from engine.components import Generator, Individual, Population
 from engine.analysis import SymbolicTaintAnalyzer
 from engine.analysis import ExecutionTraceAnalyzer
+from engine.analysis import Spectrum
 from engine.environment import FuzzingEnvironment
 from engine.operators import LinearRankingSelection
 from engine.operators import DataDependencyLinearRankingSelection
@@ -26,6 +27,7 @@ from engine.operators import Crossover
 from engine.operators import DataDependencyCrossover
 from engine.operators import Mutation
 from engine.fitness import fitness_function
+from engine.fitness import fitness_function_ddu
 
 from utils import settings
 from utils.source_map import SourceMap
@@ -71,7 +73,8 @@ class Fuzzer:
                                       args=args,
                                       seed=seed,
                                       cfg=cfg,
-                                      abi=abi)
+                                      abi=abi,
+                                      spectrum=Spectrum(len(self.overall_jumpis) * 2, len(self.overall_pcs), "jumpis"))
 
     def run(self):
         contract_address = None
@@ -156,7 +159,13 @@ class Fuzzer:
 
         # Create and run our evolutionary fuzzing engine
         engine = EvolutionaryFuzzingEngine(population=population, selection=selection, crossover=crossover, mutation=mutation)
-        engine.fitness_register(lambda x: fitness_function(x, self.env))
+        
+        # Define fitness function for the GA
+        if self.args.fitness_function == 'ddu':
+            engine.fitness_register(lambda x: fitness_function_ddu(x, self.env))
+        else:
+            engine.fitness_register(lambda x: fitness_function(x, self.env))
+
         engine.analysis.append(ExecutionTraceAnalyzer(self.env))
 
         self.env.execution_begin = time.time()
@@ -299,6 +308,13 @@ def launch_argument_parser():
     parser.add_argument("--environmental-instrumentation",
                         help="Disable/Enable environmental instrumentation: 0 - Disable, 1 - Enable (default: 1)", action="store",
                         dest="environmental_instrumentation", type=int)
+    
+    parser.add_argument("--fitness-function",
+                        help="Fitness function to be used: 'ddu', 'branch_coverage' (default: 'ddu') ", action="store",
+                        dest="fitness_function", type=str)
+    parser.add_argument("--ddu-fit-indv",
+                        help="Apply DDU fitness function to each individual of a generation in relation to previous generation's activity matrix; at the end of the generation, all the individuals' activities arrays are added to the activity matrix anyway:    0 - Disable (fit only individual), 1 - Enable (fit individual in generation)   !!(default: 0 -> Apply DDU fitness function to each individual of a generation, considering all transactions' activities up until that point, including the individuals of the same generation)!!.", action="store",
+                        dest="ddu_fit_indv", type=int)
 
     version = "ConFuzzius - Version 0.0.1 - "
     version += "\"By three methods we may learn wisdom:\n"
@@ -348,6 +364,9 @@ def launch_argument_parser():
         settings.ENVIRONMENTAL_INSTRUMENTATION = True
     elif args.environmental_instrumentation == 0:
         settings.ENVIRONMENTAL_INSTRUMENTATION = False
+
+    if args.fitness_function == None:
+        args.fitness_function = 'ddu'
 
     if args.abi:
         settings.REMOTE_FUZZING = True
